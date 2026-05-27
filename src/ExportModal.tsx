@@ -12,6 +12,7 @@ import {
   XCircle,
   RefreshCw,
   Check,
+  Share2,
 } from 'lucide-react'
 import { ItemSelect } from './AstraLibraryKit/components/item_select'
 import { Button } from './AstraLibraryKit/components/button'
@@ -97,10 +98,12 @@ const SIZE_PER_MINUTE_MB: Record<Resolution, number> = {
 
 const ANIMATION_MS = 200
 
-const INITIAL_FILE_NAME = 'ca-outdoors-v01'
-const INITIAL_EXPORT_TYPE = 'single'
-const INITIAL_FILE_TYPE = 'mp4'
-const INITIAL_VIDEO_SIZE = '1920x1080'
+const INITIAL_FILE_NAME = 'cs-outdoors-v01'
+const INITIAL_EXPORT_TYPE = 'public'
+const INITIAL_FILE_TYPE = 'view'
+const INITIAL_VIDEO_SIZE = 'never'
+
+const SHARE_LINK_BASE = 'astra.app/share/'
 
 const PROGRESS_DURATION_MS = 5000
 const QUEUE_WAIT_MS = 1500
@@ -275,6 +278,7 @@ export function ExportModal({
   const [itemResults, setItemResults] = useState<ItemResult[]>([])
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [overwriteConfirmed, setOverwriteConfirmed] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
 
   const progressRafRef = useRef<number | null>(null)
   const statusTimerRef = useRef<number | null>(null)
@@ -418,6 +422,7 @@ export function ExportModal({
     setItemResults([])
     setCancelConfirmOpen(false)
     setOverwriteConfirmed(false)
+    setLinkCopied(false)
     setMeasuredHeight(null)
     pausedRef.current = false
     cancelledRef.current = false
@@ -579,6 +584,15 @@ export function ExportModal({
     setPhase('idle')
   }
 
+  function handleCopyLink() {
+    const url = `${SHARE_LINK_BASE}${fileName.trim()}`
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(url).catch(() => {})
+    }
+    setLinkCopied(true)
+    window.setTimeout(() => setLinkCopied(false), 2000)
+  }
+
   if (!mounted) return null
 
   const toggle = (id: string) => {
@@ -618,7 +632,7 @@ export function ExportModal({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Export"
+          aria-label="Share"
           style={{ height: measuredHeight != null ? `${measuredHeight}px` : undefined }}
           className={cn(
             'export-token-drift',
@@ -658,6 +672,8 @@ export function ExportModal({
                 account={account}
                 onClose={onClose}
                 onExport={beginExportFlow}
+                linkCopied={linkCopied}
+                onCopyLink={handleCopyLink}
               />
             )}
 
@@ -853,6 +869,8 @@ interface IdleContentProps {
   account: AccountState
   onClose: () => void
   onExport: () => void
+  linkCopied: boolean
+  onCopyLink: () => void
 }
 
 function IdleContent({
@@ -860,7 +878,7 @@ function IdleContent({
   items,
   selected,
   onToggle,
-  onSelectAll,
+  onSelectAll: _onSelectAll,
   fileName,
   onFileName,
   exportType,
@@ -870,44 +888,12 @@ function IdleContent({
   videoSize,
   onVideoSize,
   validation,
-  account,
+  account: _account,
   onClose,
   onExport,
+  linkCopied,
+  onCopyLink,
 }: IdleContentProps) {
-  const statusLine = (() => {
-    if (validation.blockers.includes('plan-limit')) {
-      const used = Math.round(account.exportMinutesUsed)
-      return {
-        tone: 'danger' as const,
-        text: `Plan limit reached — ${used} of ${account.exportMinutesLimit} min used`,
-      }
-    }
-    if (validation.blockers.includes('source-missing')) {
-      const missing = validation.selectedItems.filter((i) => !i.sourceAvailable).length
-      return {
-        tone: 'danger' as const,
-        text: `${missing} selected ${missing === 1 ? 'item is' : 'items are'} missing source files`,
-      }
-    }
-    if (validation.warnings.includes('mixed-resolution')) {
-      const list = validation.uniqueResolutions.join(', ')
-      return {
-        tone: 'warning' as const,
-        text: `${list} will be scaled to ${validation.outputResolution}`,
-      }
-    }
-    if (validation.selectedItems.length > 0) {
-      return {
-        tone: 'muted' as const,
-        text: `${validation.selectedItems.length} items selected · ${formatMinutes(validation.totalDurationSeconds)} · ~${formatMB(validation.totalSizeMB)}`,
-      }
-    }
-    return {
-      tone: 'muted' as const,
-      text: '0 items selected',
-    }
-  })()
-
   return (
     <div
       style={{ height: 'calc(100vh - 144px)' }}
@@ -918,7 +904,7 @@ function IdleContent({
           : 'opacity-0 translate-y-3 ease-in',
       )}
     >
-      <PhaseHeader title="Export" onClose={onClose} />
+      <PhaseHeader title="Share" onClose={onClose} />
 
       <div className="flex gap-4 flex-1 min-h-0">
         <div className="flex-1 overflow-y-auto min-w-0 pr-1 [scrollbar-width:thin]">
@@ -959,83 +945,89 @@ function IdleContent({
         </div>
 
         <div className="w-[320px] shrink-0 bg-bg-faint border border-border-secondary rounded-2xl p-6 flex flex-col gap-6 overflow-y-auto">
-          <p className="text-heading text-text-primary">Settings</p>
-          <SelectField
-            label="Export type"
-            value={exportType}
-            onChange={onExportType}
-            options={[
-              { value: 'single', label: 'Single file' },
-              { value: 'separate', label: 'Separate files' },
-            ]}
-          />
+          <p className="text-heading text-text-primary">Sharing</p>
           <div className="flex flex-col gap-1.5">
-            <InputField label="File name" value={fileName} onChange={onFileName} />
-            {validation.warnings.includes('filename-collision') && (
-              <p className="text-[12px] text-[#b88600] flex items-center gap-1">
-                <AlertTriangle size={12} />
-                Already exists — will overwrite
-              </p>
-            )}
+            <InputField
+              label="Share link"
+              value={`${SHARE_LINK_BASE}${fileName}`}
+              onChange={(v) =>
+                onFileName(v.startsWith(SHARE_LINK_BASE) ? v.slice(SHARE_LINK_BASE.length) : v)
+              }
+              suffix={
+                <button
+                  type="button"
+                  onClick={onCopyLink}
+                  className="text-brand-primary text-[12px] font-medium cursor-pointer hover:opacity-70 transition-opacity"
+                >
+                  Copy link
+                </button>
+              }
+            />
             {validation.blockers.includes('no-filename') && (
               <p className="text-[12px] text-danger flex items-center gap-1">
                 <CircleAlert size={12} />
-                File name is required
+                Share link slug is required
               </p>
             )}
           </div>
           <SelectField
-            label="File type"
-            value={fileType}
-            onChange={onFileType}
+            label="Access"
+            value={exportType}
+            onChange={onExportType}
             options={[
-              { value: 'mp4', label: 'MP4' },
-              { value: 'mov', label: 'MOV' },
-              { value: 'webm', label: 'WebM' },
+              { value: 'public', label: 'Anyone with link' },
+              { value: 'restricted', label: 'Restricted' },
             ]}
           />
           <SelectField
-            label="Video size"
+            label="Permissions"
+            value={fileType}
+            onChange={onFileType}
+            options={[
+              { value: 'view', label: 'Can view' },
+              { value: 'comment', label: 'Can comment' },
+              { value: 'edit', label: 'Can edit' },
+            ]}
+          />
+          <SelectField
+            label="Link expires"
             value={videoSize}
             onChange={onVideoSize}
             options={[
-              { value: '3840x2160', label: '3840x2160' },
-              { value: '1920x1080', label: '1920x1080' },
-              { value: '1280x720', label: '1280x720' },
+              { value: 'never', label: 'Never' },
+              { value: '7d', label: '7 days' },
+              { value: '30d', label: '30 days' },
             ]}
           />
-          <Checkbox label="Include audio" defaultChecked />
+          <Checkbox label="Notify on view" defaultChecked />
         </div>
       </div>
 
       <div className="flex gap-3 items-center shrink-0">
         <div className="flex-1 flex items-center justify-between">
           <button
-            onClick={onSelectAll}
+            onClick={onCopyLink}
             className="text-brand-primary text-[16px] cursor-pointer hover:opacity-70 transition-opacity"
           >
-            Select all
+            Copy link
           </button>
           <span
             className={cn(
               'text-[14px] flex items-center gap-1.5',
-              statusLine.tone === 'danger' && 'text-danger',
-              statusLine.tone === 'warning' && 'text-[#b88600]',
-              statusLine.tone === 'muted' && 'text-text-tertiary',
+              linkCopied ? 'text-text-tertiary' : 'text-text-tertiary opacity-0',
             )}
+            aria-live="polite"
           >
-            {statusLine.tone === 'danger' && <CircleAlert size={14} />}
-            {statusLine.tone === 'warning' && <AlertTriangle size={14} />}
-            {statusLine.text}
+            Link copied!
           </span>
         </div>
         <Button
           variant="primary"
-          iconEnd={<Download size={16} />}
+          iconEnd={<Share2 size={16} />}
           onClick={onExport}
           disabled={!validation.canExport}
         >
-          Export
+          Share
         </Button>
       </div>
     </div>
